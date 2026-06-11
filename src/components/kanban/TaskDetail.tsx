@@ -1,8 +1,8 @@
-import { X, Clock, User, CheckCircle, Trash2, Edit2, MessageSquare, Activity, FileText, GitBranch } from 'lucide-react';
+import { X, Clock, User, CheckCircle, Trash2, Edit2, MessageSquare, Activity, FileText, GitBranch, ChevronDown, Paperclip } from 'lucide-react';
 import { useStore } from '../../store';
 import { Task, TaskActivity } from '../../types';
 import { formatDateTime } from '../../utils/dateUtils';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface TaskDetailProps {
   task: Task;
@@ -69,12 +69,18 @@ const getActivityColor = (type: TaskActivity['type']) => {
 };
 
 export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps) {
-  const { channels, members, updateTask, deleteTask, currentUser, tasks, setCurrentChannel, messages } = useStore();
+  const { channels, members, updateTask, deleteTask, currentUser, tasks, setCurrentChannel, messages, addTaskActivity, files } = useStore();
   const [showSourceMessage, setShowSourceMessage] = useState(false);
+  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
+  const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
+  const [showFileSelector, setShowFileSelector] = useState(false);
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null);
+  const priorityDropdownRef = useRef<HTMLDivElement>(null);
   
   const channel = channels.find(ch => ch.id === task.channelId);
   const assignee = members.find(m => m.id === task.assigneeId);
   const isAssignee = task.assigneeId === currentUser.id;
+  const channelFiles = files.filter(f => f.channelId === task.channelId);
   
   const linkedMessage = task.linkedMessageId && task.activities?.find(
     a => a.type === 'message_linked' && a.metadata?.messageId === task.linkedMessageId
@@ -85,11 +91,57 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
     channel: channels.find(c => c.id === task.sourceMessageInfo?.channelId)
   } : null;
   
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(event.target as Node)) {
+        setShowAssigneeDropdown(false);
+      }
+      if (priorityDropdownRef.current && !priorityDropdownRef.current.contains(event.target as Node)) {
+        setShowPriorityDropdown(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+  
   const handleStatusChange = (newStatus: Task['status']) => {
     updateTask(task.id, { status: newStatus });
     if (onUpdate) {
       onUpdate({ ...task, status: newStatus });
     }
+  };
+  
+  const handleAssigneeChange = (newAssigneeId: string) => {
+    updateTask(task.id, { assigneeId: newAssigneeId });
+    setShowAssigneeDropdown(false);
+    if (onUpdate) {
+      onUpdate({ ...task, assigneeId: newAssigneeId });
+    }
+  };
+  
+  const handlePriorityChange = (newPriority: Task['priority']) => {
+    updateTask(task.id, { priority: newPriority });
+    setShowPriorityDropdown(false);
+    if (onUpdate) {
+      onUpdate({ ...task, priority: newPriority });
+    }
+  };
+  
+  const handleAttachFile = (fileId: string) => {
+    const file = files.find(f => f.id === fileId);
+    if (file) {
+      addTaskActivity(task.id, {
+        type: 'file_attached',
+        description: `添加了附件"${file.name}"`,
+        performedBy: currentUser.id,
+        metadata: {
+          fileId: file.id,
+          fileName: file.name
+        }
+      });
+    }
+    setShowFileSelector(false);
   };
   
   const handleDelete = () => {
@@ -186,10 +238,16 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
         )}
         
         <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-[#2C3E50] rounded-lg p-4">
+          <div className="bg-[#2C3E50] rounded-lg p-4 relative" ref={assigneeDropdownRef}>
             <div className="flex items-center gap-2 mb-2">
               <User className="w-4 h-4 text-gray-400" />
               <span className="text-sm text-gray-400">负责人</span>
+              <button
+                onClick={() => setShowAssigneeDropdown(!showAssigneeDropdown)}
+                className="ml-auto p-1 hover:bg-[#34495E] rounded transition-colors"
+              >
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </button>
             </div>
             {assignee && (
               <div className="flex items-center gap-2">
@@ -202,19 +260,139 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
                 </div>
               </div>
             )}
+            
+            {showAssigneeDropdown && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#34495E] border border-[#4A5568] rounded-lg shadow-xl z-10 max-h-48 overflow-y-auto">
+                {members.map(member => (
+                  <button
+                    key={member.id}
+                    onClick={() => handleAssigneeChange(member.id)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-[#4A5568] transition-colors ${
+                      member.id === task.assigneeId ? 'bg-[#E67E22]/20' : ''
+                    }`}
+                  >
+                    <div className="w-6 h-6 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                      {member.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 text-left">
+                      <p className="text-white text-sm">{member.name}</p>
+                      <p className="text-gray-400 text-xs">{member.position}</p>
+                    </div>
+                    {member.id === task.assigneeId && (
+                      <CheckCircle className="w-4 h-4 text-[#E67E22]" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           
-          <div className="bg-[#2C3E50] rounded-lg p-4">
+          <div className="bg-[#2C3E50] rounded-lg p-4 relative" ref={priorityDropdownRef}>
             <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-4 h-4 text-gray-400" />
-              <span className="text-sm text-gray-400">截止日期</span>
+              <span className="text-sm text-gray-400">优先级</span>
+              <button
+                onClick={() => setShowPriorityDropdown(!showPriorityDropdown)}
+                className="ml-auto p-1 hover:bg-[#34495E] rounded transition-colors"
+              >
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </button>
             </div>
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 text-sm rounded border ${getPriorityColor(task.priority)}`}>
+                {getPriorityLabel(task.priority)}
+              </span>
+            </div>
+            
+            {showPriorityDropdown && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-[#34495E] border border-[#4A5568] rounded-lg shadow-xl z-10">
+                {(['urgent', 'important', 'normal'] as const).map(priority => (
+                  <button
+                    key={priority}
+                    onClick={() => handlePriorityChange(priority)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-[#4A5568] transition-colors ${
+                      priority === task.priority ? 'bg-[#E67E22]/20' : ''
+                    }`}
+                  >
+                    <span className={`px-3 py-1 text-sm rounded border ${getPriorityColor(priority)}`}>
+                      {getPriorityLabel(priority)}
+                    </span>
+                    {priority === task.priority && (
+                      <CheckCircle className="w-4 h-4 text-[#E67E22] ml-auto" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+            <Clock className="w-4 h-4" />
+            截止日期
+          </h3>
+          <div className="bg-[#2C3E50] rounded-lg p-4">
             <p className={`text-lg font-semibold ${isOverdue ? 'text-red-400' : 'text-white'}`}>
               {formatTaskDueDate(task.dueDate)}
             </p>
             <p className="text-xs text-gray-400 mt-1">
               {formatDateTime(task.dueDate)}
             </p>
+          </div>
+        </div>
+        
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+            <Paperclip className="w-4 h-4" />
+            关联文件
+            <button
+              onClick={() => setShowFileSelector(!showFileSelector)}
+              className="ml-auto px-3 py-1 bg-[#E67E22] text-white text-xs rounded hover:bg-[#D35400] transition-colors"
+            >
+              添加文件
+            </button>
+          </h3>
+          {showFileSelector && (
+            <div className="bg-[#2C3E50] rounded-lg p-4 mb-3 max-h-48 overflow-y-auto">
+              {channelFiles.length > 0 ? (
+                <div className="space-y-2">
+                  {channelFiles.map(file => (
+                    <button
+                      key={file.id}
+                      onClick={() => handleAttachFile(file.id)}
+                      className="w-full flex items-center gap-2 px-3 py-2 bg-[#34495E] hover:bg-[#4A5568] rounded transition-colors text-left"
+                    >
+                      <FileText className="w-4 h-4 text-gray-400" />
+                      <div className="flex-1">
+                        <p className="text-white text-sm">{file.name}</p>
+                        <p className="text-gray-400 text-xs">
+                          {(file.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm text-center">该频道暂无文件</p>
+              )}
+            </div>
+          )}
+          <div className="bg-[#2C3E50] rounded-lg p-4">
+            {task.activities?.filter(a => a.type === 'file_attached').length > 0 ? (
+              <div className="space-y-2">
+                {task.activities.filter(a => a.type === 'file_attached').map(activity => (
+                  <div key={activity.id} className="flex items-center gap-2 text-sm">
+                    <FileText className="w-4 h-4 text-indigo-400" />
+                    <span className="text-gray-300">{activity.metadata?.fileName}</span>
+                    <span className="text-gray-500 text-xs ml-auto">
+                      {formatDateTime(activity.performedAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">暂无关联文件</p>
+            )}
           </div>
         </div>
         
