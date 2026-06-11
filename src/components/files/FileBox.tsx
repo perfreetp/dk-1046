@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Search, Filter, Download, Trash2, Settings, Save, AlertTriangle } from 'lucide-react';
+import { Search, Filter, Download, Trash2, Settings, Save, AlertTriangle, Archive, Package } from 'lucide-react';
 import { useStore } from '../../store';
 import FileItemCard from './FileItem';
 import FileUploader from './FileUploader';
+import { exportChannelArchive, exportFiles } from '../../utils/exportUtils';
 
 export default function FileBox() {
-  const { files, channels, currentChannel, settings, setSettings, cleanupExpiredFiles } = useStore();
+  const { files, channels, currentChannel, settings, setSettings, cleanupExpiredFiles, messages, tasks, members } = useStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'image' | 'document' | 'archive'>('all');
   const [showSettings, setShowSettings] = useState(false);
@@ -13,6 +14,8 @@ export default function FileBox() {
   const [tempCacheSize, setTempCacheSize] = useState(settings.offlineCacheSize);
   const [tempCleanupDays, setTempCleanupDays] = useState(settings.cleanupDays);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>('');
   
   const filteredFiles = files.filter(file => {
     const matchesSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -42,6 +45,27 @@ export default function FileBox() {
     setShowCleanupConfirm(false);
   };
   
+  const handleExportArchive = () => {
+    setShowArchiveModal(true);
+    if (!selectedChannelId && channels.length > 0) {
+      setSelectedChannelId(channels[0].id);
+    }
+  };
+  
+  const confirmExportArchive = () => {
+    if (!selectedChannelId) return;
+    
+    const channel = channels.find(c => c.id === selectedChannelId);
+    if (!channel) return;
+    
+    const channelMessages = messages[selectedChannelId] || [];
+    const channelFiles = files.filter(f => f.channelId === selectedChannelId);
+    const channelTasks = tasks.filter(t => t.channelId === selectedChannelId);
+    
+    exportChannelArchive(channel, channelMessages, channelFiles, channelTasks, members);
+    setShowArchiveModal(false);
+  };
+  
   return (
     <div className="flex-1 bg-[#0F1419] overflow-hidden flex flex-col">
       <div className="h-14 border-b border-[#2C3E50] flex items-center justify-between px-6 bg-[#1E3A5F]">
@@ -52,6 +76,13 @@ export default function FileBox() {
           <p className="text-xs text-gray-400">{filteredFiles.length} 个文件</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleExportArchive}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors text-sm"
+          >
+            <Archive className="w-4 h-4" />
+            归档导出
+          </button>
           {expiredFilesCount > 0 && (
             <button
               onClick={handleCleanupExpired}
@@ -216,6 +247,101 @@ export default function FileBox() {
               <p>文件预览</p>
             </div>
           )}
+        </div>
+      )}
+      
+      {showArchiveModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#1E3A5F] rounded-lg w-full max-w-md p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Archive className="w-5 h-5" />
+                事件归档导出
+              </h2>
+              <button
+                onClick={() => setShowArchiveModal(false)}
+                className="p-1 text-gray-400 hover:text-white hover:bg-[#2C3E50] rounded transition-colors"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <p className="text-sm text-gray-400 mb-4">
+              选择要归档的事件频道，系统将导出该频道的所有沟通记录、文件和任务信息。
+            </p>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                选择频道
+              </label>
+              <select
+                value={selectedChannelId}
+                onChange={(e) => setSelectedChannelId(e.target.value)}
+                className="w-full px-4 py-2 bg-[#2C3E50] border border-[#34495E] rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-[#E67E22]"
+              >
+                <option value="">请选择频道</option>
+                {channels.map(channel => {
+                  const msgCount = messages[channel.id]?.length || 0;
+                  const fileCount = files.filter(f => f.channelId === channel.id).length;
+                  const taskCount = tasks.filter(t => t.channelId === channel.id).length;
+                  return (
+                    <option key={channel.id} value={channel.id}>
+                      {channel.name} ({msgCount}条消息, {fileCount}个文件, {taskCount}个任务)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            
+            {selectedChannelId && (
+              <div className="mb-4 p-4 bg-[#2C3E50] rounded-lg">
+                <h4 className="text-sm font-medium text-white mb-2">归档内容预览</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-gray-400" />
+                    <span className="text-gray-300">
+                      消息: <span className="text-white">{messages[selectedChannelId]?.length || 0}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-gray-400" />
+                    <span className="text-gray-300">
+                      文件: <span className="text-white">{files.filter(f => f.channelId === selectedChannelId).length}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-gray-400" />
+                    <span className="text-gray-300">
+                      任务: <span className="text-white">{tasks.filter(t => t.channelId === selectedChannelId).length}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-gray-400" />
+                    <span className="text-gray-300">
+                      成员: <span className="text-white">{channels.find(c => c.id === selectedChannelId)?.members.length || 0}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowArchiveModal(false)}
+                className="flex-1 px-4 py-2 bg-[#2C3E50] text-white rounded-lg hover:bg-[#34495E] transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmExportArchive}
+                disabled={!selectedChannelId}
+                className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                导出归档
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

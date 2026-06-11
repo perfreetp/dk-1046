@@ -14,6 +14,7 @@ export default function MessageInput() {
   const {
     isRecording,
     duration,
+    audioBlob,
     audioUrl,
     startRecording,
     stopRecording,
@@ -76,8 +77,13 @@ export default function MessageInput() {
       duration: duration
     });
     
+    cancelRecording();
     setInputValue('');
     setShowMention(false);
+  };
+  
+  const handleCancelVoice = () => {
+    cancelRecording();
   };
   
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -191,7 +197,7 @@ export default function MessageInput() {
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={cancelRecording}
+                  onClick={handleCancelVoice}
                   className="px-4 py-2 bg-[#34495E] text-white rounded hover:bg-[#4A5568] transition-colors text-sm flex items-center gap-2"
                 >
                   <X className="w-4 h-4" />
@@ -240,7 +246,7 @@ export default function MessageInput() {
               </div>
               <div className="flex gap-2 ml-4">
                 <button
-                  onClick={cancelRecording}
+                  onClick={handleCancelVoice}
                   className="px-4 py-2 bg-[#34495E] text-white rounded hover:bg-[#4A5568] transition-colors text-sm"
                 >
                   重录
@@ -265,14 +271,15 @@ export default function MessageInput() {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder={`在 ${currentChannel.name} 中发送消息...`}
-              disabled={isRecording}
+              disabled={isRecording || !!audioUrl}
               className="w-full px-4 py-3 bg-[#2C3E50] border border-[#34495E] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#E67E22] pr-20 disabled:opacity-50"
             />
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
               <div className="relative">
                 <button
                   onClick={() => setShowFileMenu(!showFileMenu)}
-                  className="p-2 text-gray-400 hover:text-white hover:bg-[#34495E] rounded transition-colors"
+                  disabled={isRecording || !!audioUrl}
+                  className="p-2 text-gray-400 hover:text-white hover:bg-[#34495E] rounded transition-colors disabled:opacity-50"
                 >
                   <Paperclip className="w-4 h-4" />
                 </button>
@@ -298,7 +305,11 @@ export default function MessageInput() {
               <button
                 onClick={handleStartRecording}
                 disabled={isRecording || !!audioUrl}
-                className="p-2 text-gray-400 hover:text-white hover:bg-[#34495E] rounded transition-colors disabled:opacity-50"
+                className={`p-2 rounded transition-colors ${
+                  isRecording || !!audioUrl 
+                    ? 'text-gray-400 opacity-50 cursor-not-allowed' 
+                    : 'text-gray-400 hover:text-white hover:bg-[#34495E]'
+                }`}
               >
                 <Mic className="w-4 h-4" />
               </button>
@@ -315,6 +326,13 @@ export default function MessageInput() {
           </button>
         </div>
       </div>
+      
+      {showFileMenu && (
+        <div 
+          className="fixed inset-0 z-30" 
+          onClick={() => setShowFileMenu(false)}
+        />
+      )}
     </div>
   );
 }

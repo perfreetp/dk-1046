@@ -1,7 +1,8 @@
-import { X, Clock, User, CheckCircle, Trash2, Edit2 } from 'lucide-react';
+import { X, Clock, User, CheckCircle, Trash2, Edit2, MessageSquare, Activity, FileText, GitBranch } from 'lucide-react';
 import { useStore } from '../../store';
-import { Task } from '../../types';
+import { Task, TaskActivity } from '../../types';
 import { formatDateTime } from '../../utils/dateUtils';
+import { useState, useEffect } from 'react';
 
 interface TaskDetailProps {
   task: Task;
@@ -26,12 +27,65 @@ const formatTaskDueDate = (timestamp: number): string => {
   return `${diffDays}天后截止`;
 };
 
+const getActivityIcon = (type: TaskActivity['type']) => {
+  switch (type) {
+    case 'created':
+      return <GitBranch className="w-4 h-4" />;
+    case 'status_changed':
+    case 'completed':
+      return <Activity className="w-4 h-4" />;
+    case 'assigned':
+      return <User className="w-4 h-4" />;
+    case 'priority_changed':
+      return <Edit2 className="w-4 h-4" />;
+    case 'message_linked':
+      return <MessageSquare className="w-4 h-4" />;
+    case 'file_attached':
+      return <FileText className="w-4 h-4" />;
+    default:
+      return <Activity className="w-4 h-4" />;
+  }
+};
+
+const getActivityColor = (type: TaskActivity['type']) => {
+  switch (type) {
+    case 'created':
+      return 'bg-blue-500';
+    case 'completed':
+      return 'bg-green-500';
+    case 'status_changed':
+      return 'bg-purple-500';
+    case 'assigned':
+      return 'bg-orange-500';
+    case 'priority_changed':
+      return 'bg-yellow-500';
+    case 'message_linked':
+      return 'bg-cyan-500';
+    case 'file_attached':
+      return 'bg-indigo-500';
+    default:
+      return 'bg-gray-500';
+  }
+};
+
 export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps) {
-  const { channels, members, updateTask, deleteTask, currentUser } = useStore();
+  const { channels, members, updateTask, deleteTask, currentUser, tasks, setCurrentChannel } = useStore();
+  const [showSourceMessage, setShowSourceMessage] = useState(false);
   
   const channel = channels.find(ch => ch.id === task.channelId);
   const assignee = members.find(m => m.id === task.assigneeId);
   const isAssignee = task.assigneeId === currentUser.id;
+  
+  const linkedMessage = task.linkedMessageId && task.activities?.find(
+    a => a.type === 'message_linked' && a.metadata?.messageId === task.linkedMessageId
+  );
+  
+  const sourceMessage = linkedMessage?.metadata?.channelId && task.linkedMessageId
+    ? { 
+        message: tasks.find(t => t.id === task.linkedMessageId) ? null : null,
+        channel: channels.find(c => c.id === linkedMessage.metadata?.channelId)
+      }
+    : null;
   
   const handleStatusChange = (newStatus: Task['status']) => {
     updateTask(task.id, { status: newStatus });
@@ -44,6 +98,16 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
     if (confirm('确定要删除这个任务吗？')) {
       deleteTask(task.id);
       onClose();
+    }
+  };
+  
+  const handleViewSourceMessage = () => {
+    if (linkedMessage?.metadata?.channelId) {
+      const targetChannel = channels.find(c => c.id === linkedMessage.metadata?.channelId);
+      if (targetChannel) {
+        setCurrentChannel(targetChannel);
+        onClose();
+      }
     }
   };
   
@@ -67,7 +131,7 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
   
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
-      <div className="bg-[#1E3A5F] rounded-lg w-full max-w-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-[#1E3A5F] rounded-lg w-full max-w-3xl p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between mb-6">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
@@ -183,6 +247,42 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
           </div>
         )}
         
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+            <Activity className="w-4 h-4" />
+            处置时间线
+          </h3>
+          <div className="bg-[#2C3E50] rounded-lg p-4 max-h-64 overflow-y-auto">
+            {task.activities && task.activities.length > 0 ? (
+              <div className="space-y-3">
+                {[...task.activities].reverse().map((activity, index) => {
+                  const performer = members.find(m => m.id === activity.performedBy);
+                  return (
+                    <div key={activity.id} className="flex gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${getActivityColor(activity.type)}`}>
+                        {getActivityIcon(activity.type)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium text-white">
+                            {performer?.name || '系统'}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {formatDateTime(activity.performedAt)}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-300">{activity.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 text-center py-4">暂无处置记录</p>
+            )}
+          </div>
+        </div>
+        
         <div className="flex gap-3">
           {isAssignee && task.status !== 'completed' && (
             <button
@@ -191,6 +291,16 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
             >
               <CheckCircle className="w-4 h-4" />
               标记完成
+            </button>
+          )}
+          
+          {linkedMessage && (
+            <button
+              onClick={handleViewSourceMessage}
+              className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 transition-colors"
+            >
+              <MessageSquare className="w-4 h-4" />
+              查看来源消息
             </button>
           )}
           

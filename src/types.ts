@@ -49,6 +49,22 @@ export interface FileItem {
   url: string;
 }
 
+export interface TaskActivity {
+  id: string;
+  taskId: string;
+  type: 'created' | 'status_changed' | 'assigned' | 'priority_changed' | 'file_attached' | 'message_linked' | 'completed' | 'updated';
+  description: string;
+  performedBy: string;
+  performedAt: number;
+  previousValue?: string;
+  newValue?: string;
+  metadata?: {
+    fileId?: string;
+    messageId?: string;
+    channelId?: string;
+  };
+}
+
 export interface Task {
   id: string;
   channelId: string;
@@ -60,6 +76,9 @@ export interface Task {
   dueDate: number;
   createdAt: number;
   completedAt?: number;
+  activities?: TaskActivity[];
+  linkedMessageId?: string;
+  linkedFileIds?: string[];
 }
 
 export interface AppSettings {

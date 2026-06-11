@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Member, Channel, Message, FileItem, Task, AppSettings } from './types';
+import { Member, Channel, Message, FileItem, Task, AppSettings, TaskActivity } from './types';
 import { 
   mockMembers, 
   mockChannels, 
@@ -54,9 +54,11 @@ interface AppState {
   confirmFile: (fileId: string, userId: string) => void;
   cleanupExpiredFiles: () => void;
   
-  addTask: (task: Omit<Task, 'id' | 'createdAt'>) => void;
+  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'activities'>) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
   deleteTask: (id: string) => void;
+  addTaskActivity: (taskId: string, activity: Omit<TaskActivity, 'id' | 'taskId' | 'performedAt'>) => void;
+  linkMessageToTask: (taskId: string, messageId: string, channelId: string) => void;
   
   updateMemberStatus: (memberId: string, status: Member['status']) => void;
   
@@ -245,22 +247,87 @@ export const useStore = create<AppState>((set, get) => ({
     const newTask: Task = {
       ...taskData,
       id: uuidv4(),
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      activities: [{
+        id: uuidv4(),
+        taskId: '',
+        type: 'created',
+        description: `创建了任务`,
+        performedBy: taskData.assigneeId,
+        performedAt: Date.now()
+      }]
     };
+    newTask.activities![0].taskId = newTask.id;
+    
     set((state) => {
       const newTasks = [...state.tasks, newTask];
       saveToStorage('tasks', newTasks);
       return { tasks: newTasks };
     });
+    
+    return newTask.id;
   },
 
   updateTask: (id, updates) => set((state) => {
+    const task = state.tasks.find(t => t.id === id);
+    const newActivities = [...(task?.activities || [])];
+    
+    if (updates.status && updates.status !== task?.status) {
+      const statusLabels: Record<string, string> = {
+        'todo': '待处理',
+        'inProgress': '进行中',
+        'completed': '已完成'
+      };
+      newActivities.push({
+        id: uuidv4(),
+        taskId: id,
+        type: updates.status === 'completed' ? 'completed' : 'status_changed',
+        description: `将状态改为"${statusLabels[updates.status]}"`,
+        performedBy: state.currentUser.id,
+        performedAt: Date.now()
+      });
+    }
+    
+    if (updates.assigneeId && updates.assigneeId !== task?.assigneeId) {
+      const oldAssignee = state.members.find(m => m.id === task?.assigneeId);
+      const newAssignee = state.members.find(m => m.id === updates.assigneeId);
+      newActivities.push({
+        id: uuidv4(),
+        taskId: id,
+        type: 'assigned',
+        description: `将负责人从"${oldAssignee?.name || '未知'}"改为"${newAssignee?.name || '未知'}"`,
+        performedBy: state.currentUser.id,
+        performedAt: Date.now(),
+        previousValue: oldAssignee?.name,
+        newValue: newAssignee?.name
+      });
+    }
+    
+    if (updates.priority && updates.priority !== task?.priority) {
+      const priorityLabels: Record<string, string> = {
+        'urgent': '紧急',
+        'important': '重要',
+        'normal': '一般'
+      };
+      newActivities.push({
+        id: uuidv4(),
+        taskId: id,
+        type: 'priority_changed',
+        description: `将优先级从"${priorityLabels[task?.priority || 'normal']}"改为"${priorityLabels[updates.priority]}"`,
+        performedBy: state.currentUser.id,
+        performedAt: Date.now(),
+        previousValue: priorityLabels[task?.priority || 'normal'],
+        newValue: priorityLabels[updates.priority]
+      });
+    }
+    
     const newTasks = state.tasks.map((t) =>
       t.id === id
         ? { 
             ...t, 
             ...updates,
-            completedAt: updates.status === 'completed' ? Date.now() : t.completedAt
+            completedAt: updates.status === 'completed' ? Date.now() : t.completedAt,
+            activities: newActivities
           }
         : t
     );
@@ -270,6 +337,51 @@ export const useStore = create<AppState>((set, get) => ({
 
   deleteTask: (id) => set((state) => {
     const newTasks = state.tasks.filter((t) => t.id !== id);
+    saveToStorage('tasks', newTasks);
+    return { tasks: newTasks };
+  }),
+
+  addTaskActivity: (taskId, activity) => set((state) => {
+    const newActivity: TaskActivity = {
+      ...activity,
+      id: uuidv4(),
+      taskId,
+      performedAt: Date.now()
+    };
+    
+    const newTasks = state.tasks.map((t) =>
+      t.id === taskId
+        ? { ...t, activities: [...(t.activities || []), newActivity] }
+        : t
+    );
+    saveToStorage('tasks', newTasks);
+    return { tasks: newTasks };
+  }),
+
+  linkMessageToTask: (taskId, messageId, channelId) => set((state) => {
+    const message = state.messages[channelId]?.find(m => m.id === messageId);
+    const channel = state.channels.find(c => c.id === channelId);
+    const sender = state.members.find(m => m.id === message?.senderId);
+    
+    const newActivity: TaskActivity = {
+      id: uuidv4(),
+      taskId,
+      type: 'message_linked',
+      description: `关联了来自"${channel?.name}"的消息: "${message?.content?.substring(0, 50)}${message?.content && message.content.length > 50 ? '...' : ''}"`,
+      performedBy: state.currentUser.id,
+      performedAt: Date.now(),
+      metadata: { messageId, channelId }
+    };
+    
+    const newTasks = state.tasks.map((t) =>
+      t.id === taskId
+        ? { 
+            ...t, 
+            linkedMessageId: messageId,
+            activities: [...(t.activities || []), newActivity]
+          }
+        : t
+    );
     saveToStorage('tasks', newTasks);
     return { tasks: newTasks };
   }),
