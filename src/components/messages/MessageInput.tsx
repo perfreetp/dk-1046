@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Mic, Image, X } from 'lucide-react';
+import { Send, Paperclip, Mic, Image, X, StopCircle, Play, Pause } from 'lucide-react';
 import { useStore } from '../../store';
+import { useAudioRecorder, formatDuration } from '../../hooks/useAudioRecorder';
 
 export default function MessageInput() {
   const { currentChannel, currentUser, members, addMessage } = useStore();
@@ -8,8 +9,20 @@ export default function MessageInput() {
   const [showMention, setShowMention] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [showFileMenu, setShowFileMenu] = useState(false);
-  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  
+  const {
+    isRecording,
+    duration,
+    audioUrl,
+    startRecording,
+    stopRecording,
+    cancelRecording,
+    error: recordingError
+  } = useAudioRecorder();
+  
   const inputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   
   const filteredMembers = members.filter(member =>
     member.name.toLowerCase().includes(mentionQuery.toLowerCase())
@@ -50,6 +63,23 @@ export default function MessageInput() {
     setShowMention(false);
   };
   
+  const handleSendVoice = () => {
+    if (!audioUrl || !currentChannel) return;
+    
+    addMessage({
+      channelId: currentChannel.id,
+      senderId: currentUser.id,
+      type: 'voice',
+      content: `语音留言 (${formatDuration(duration)})`,
+      mentions: [],
+      attachmentUrl: audioUrl,
+      duration: duration
+    });
+    
+    setInputValue('');
+    setShowMention(false);
+  };
+  
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -75,19 +105,20 @@ export default function MessageInput() {
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file && currentChannel) {
-        const url = type === 'image' 
-          ? URL.createObjectURL(file)
-          : `data:application/octet-stream;base64,${btoa('dummy file')}`;
-        
-        addMessage({
-          channelId: currentChannel.id,
-          senderId: currentUser.id,
-          type: type,
-          content: `上传了文件: ${file.name}`,
-          mentions: [],
-          attachmentUrl: url,
-          attachmentName: file.name
-        });
+        const reader = new FileReader();
+        reader.onload = () => {
+          const url = reader.result as string;
+          addMessage({
+            channelId: currentChannel.id,
+            senderId: currentUser.id,
+            type: type,
+            content: `上传了文件: ${file.name}`,
+            mentions: [],
+            attachmentUrl: url,
+            attachmentName: file.name
+          });
+        };
+        reader.readAsDataURL(file);
       }
     };
     
@@ -95,10 +126,31 @@ export default function MessageInput() {
     setShowFileMenu(false);
   };
   
+  const togglePlayback = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+  
+  const handleStartRecording = async () => {
+    await startRecording();
+  };
+  
   if (!currentChannel) return null;
   
   return (
     <div className="border-t border-[#2C3E50] bg-[#1E3A5F] p-4">
+      <audio 
+        ref={audioRef} 
+        src={audioUrl || undefined}
+        onEnded={() => setIsPlaying(false)}
+      />
+      
       <div className="relative">
         {showMention && (
           <div className="absolute bottom-full left-0 mb-2 w-64 bg-[#2C3E50] border border-[#34495E] rounded-lg shadow-xl overflow-hidden">
@@ -128,6 +180,82 @@ export default function MessageInput() {
           </div>
         )}
         
+        {isRecording && (
+          <div className="mb-3 p-4 bg-[#2C3E50] rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                <span className="text-sm text-white font-mono">
+                  {formatDuration(duration)} / 3:00
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={cancelRecording}
+                  className="px-4 py-2 bg-[#34495E] text-white rounded hover:bg-[#4A5568] transition-colors text-sm flex items-center gap-2"
+                >
+                  <X className="w-4 h-4" />
+                  取消
+                </button>
+                <button
+                  onClick={stopRecording}
+                  className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm flex items-center gap-2"
+                >
+                  <StopCircle className="w-4 h-4" />
+                  停止
+                </button>
+              </div>
+            </div>
+            {recordingError && (
+              <p className="mt-2 text-sm text-red-400">{recordingError}</p>
+            )}
+          </div>
+        )}
+        
+        {audioUrl && !isRecording && (
+          <div className="mb-3 p-4 bg-[#2C3E50] rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={togglePlayback}
+                  className="p-2 bg-[#E67E22] text-white rounded-full hover:bg-[#D35400] transition-colors"
+                >
+                  {isPlaying ? (
+                    <Pause className="w-4 h-4" />
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                </button>
+                <div className="flex-1">
+                  <div className="h-2 bg-[#34495E] rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-[#E67E22] transition-all"
+                      style={{ width: `${(duration / 180) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-sm text-white font-mono">
+                  {formatDuration(duration)}
+                </span>
+              </div>
+              <div className="flex gap-2 ml-4">
+                <button
+                  onClick={cancelRecording}
+                  className="px-4 py-2 bg-[#34495E] text-white rounded hover:bg-[#4A5568] transition-colors text-sm"
+                >
+                  重录
+                </button>
+                <button
+                  onClick={handleSendVoice}
+                  className="px-4 py-2 bg-[#27AE60] text-white rounded hover:bg-green-600 transition-colors text-sm"
+                >
+                  发送
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <div className="flex items-end gap-3">
           <div className="flex-1 relative">
             <input
@@ -137,7 +265,8 @@ export default function MessageInput() {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder={`在 ${currentChannel.name} 中发送消息...`}
-              className="w-full px-4 py-3 bg-[#2C3E50] border border-[#34495E] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#E67E22] pr-20"
+              disabled={isRecording}
+              className="w-full px-4 py-3 bg-[#2C3E50] border border-[#34495E] rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#E67E22] pr-20 disabled:opacity-50"
             />
             <div className="absolute right-2 bottom-2 flex items-center gap-1">
               <div className="relative">
@@ -167,8 +296,9 @@ export default function MessageInput() {
                 )}
               </div>
               <button
-                onClick={() => setShowVoiceRecorder(!showVoiceRecorder)}
-                className="p-2 text-gray-400 hover:text-white hover:bg-[#34495E] rounded transition-colors"
+                onClick={handleStartRecording}
+                disabled={isRecording || !!audioUrl}
+                className="p-2 text-gray-400 hover:text-white hover:bg-[#34495E] rounded transition-colors disabled:opacity-50"
               >
                 <Mic className="w-4 h-4" />
               </button>
@@ -177,7 +307,7 @@ export default function MessageInput() {
           
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || isRecording || !!audioUrl}
             className="px-6 py-3 bg-[#E67E22] text-white rounded-lg hover:bg-[#D35400] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >
             <Send className="w-4 h-4" />
@@ -185,43 +315,6 @@ export default function MessageInput() {
           </button>
         </div>
       </div>
-      
-      {showVoiceRecorder && (
-        <div className="mt-3 p-4 bg-[#2C3E50] rounded-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-white">录音中...</span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowVoiceRecorder(false)}
-                className="px-4 py-2 bg-[#34495E] text-white rounded hover:bg-[#4A5568] transition-colors text-sm"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  if (currentChannel) {
-                    addMessage({
-                      channelId: currentChannel.id,
-                      senderId: currentUser.id,
-                      type: 'voice',
-                      content: '语音留言 (3:00)',
-                      mentions: [],
-                      duration: 180
-                    });
-                  }
-                  setShowVoiceRecorder(false);
-                }}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm"
-              >
-                发送录音
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -10,6 +10,25 @@ import {
 } from './mockData';
 import { v4 as uuidv4 } from 'uuid';
 
+const STORAGE_PREFIX = 'emergency_';
+
+const loadFromStorage = <T>(key: string, defaultValue: T): T => {
+  try {
+    const item = localStorage.getItem(STORAGE_PREFIX + key);
+    return item ? JSON.parse(item) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const saveToStorage = (key: string, value: any) => {
+  try {
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+  } catch (error) {
+    console.error('Storage save error:', error);
+  }
+};
+
 interface AppState {
   currentUser: Member;
   currentChannel: Channel | null;
@@ -33,6 +52,7 @@ interface AppState {
   addFile: (file: Omit<FileItem, 'id' | 'uploadedAt'>) => void;
   deleteFile: (id: string) => void;
   confirmFile: (fileId: string, userId: string) => void;
+  cleanupExpiredFiles: () => void;
   
   addTask: (task: Omit<Task, 'id' | 'createdAt'>) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
@@ -42,22 +62,31 @@ interface AppState {
   
   setSettings: (settings: Partial<AppSettings>) => void;
   setConnectionStatus: (status: AppState['connectionStatus']) => void;
+  
+  resetToDemo: () => void;
 }
 
+const initialChannels = mockChannels;
+const initialMessages = mockMessages;
+const initialFiles = mockFiles;
+const initialTasks = mockTasks;
+const initialMembers = mockMembers;
+const initialSettings = {
+  offlineCacheSize: 500,
+  autoCleanup: true,
+  cleanupDays: 30,
+  notifications: true
+};
+
 export const useStore = create<AppState>((set, get) => ({
-  currentUser,
+  currentUser: loadFromStorage('currentUser', currentUser),
   currentChannel: null,
-  channels: mockChannels,
-  messages: mockMessages,
-  members: mockMembers,
-  files: mockFiles,
-  tasks: mockTasks,
-  settings: {
-    offlineCacheSize: 500,
-    autoCleanup: true,
-    cleanupDays: 30,
-    notifications: true
-  },
+  channels: loadFromStorage('channels', initialChannels),
+  messages: loadFromStorage('messages', initialMessages),
+  members: loadFromStorage('members', initialMembers),
+  files: loadFromStorage('files', initialFiles),
+  tasks: loadFromStorage('tasks', initialTasks),
+  settings: loadFromStorage('settings', initialSettings),
   connectionStatus: 'connected',
 
   setCurrentChannel: (channel) => set({ currentChannel: channel }),
@@ -69,33 +98,52 @@ export const useStore = create<AppState>((set, get) => ({
       createdAt: Date.now(),
       unreadCount: 0
     };
-    set((state) => ({
-      channels: [...state.channels, newChannel],
-      currentChannel: newChannel
-    }));
+    set((state) => {
+      const newChannels = [...state.channels, newChannel];
+      saveToStorage('channels', newChannels);
+      return {
+        channels: newChannels,
+        currentChannel: newChannel
+      };
+    });
   },
 
-  updateChannel: (id, updates) => set((state) => ({
-    channels: state.channels.map((ch) =>
+  updateChannel: (id, updates) => set((state) => {
+    const newChannels = state.channels.map((ch) =>
       ch.id === id ? { ...ch, ...updates } : ch
-    ),
-    currentChannel: state.currentChannel?.id === id
+    );
+    const newCurrentChannel = state.currentChannel?.id === id
       ? { ...state.currentChannel, ...updates }
-      : state.currentChannel
-  })),
+      : state.currentChannel;
+    saveToStorage('channels', newChannels);
+    return {
+      channels: newChannels,
+      currentChannel: newCurrentChannel
+    };
+  }),
 
-  deleteChannel: (id) => set((state) => ({
-    channels: state.channels.filter((ch) => ch.id !== id),
-    currentChannel: state.currentChannel?.id === id ? null : state.currentChannel
-  })),
+  deleteChannel: (id) => set((state) => {
+    const newChannels = state.channels.filter((ch) => ch.id !== id);
+    const newMessages = { ...state.messages };
+    delete newMessages[id];
+    saveToStorage('channels', newChannels);
+    saveToStorage('messages', newMessages);
+    return {
+      channels: newChannels,
+      messages: newMessages,
+      currentChannel: state.currentChannel?.id === id ? null : state.currentChannel
+    };
+  }),
 
-  joinChannel: (channelId, memberId) => set((state) => ({
-    channels: state.channels.map((ch) =>
+  joinChannel: (channelId, memberId) => set((state) => {
+    const newChannels = state.channels.map((ch) =>
       ch.id === channelId && !ch.members.includes(memberId)
         ? { ...ch, members: [...ch.members, memberId] }
         : ch
-    )
-  })),
+    );
+    saveToStorage('channels', newChannels);
+    return { channels: newChannels };
+  }),
 
   addMessage: (messageData) => {
     const newMessage: Message = {
@@ -117,6 +165,9 @@ export const useStore = create<AppState>((set, get) => ({
           ? { ...ch, unreadCount: ch.unreadCount + 1 }
           : ch
       );
+      
+      saveToStorage('messages', updatedMessages);
+      saveToStorage('channels', updatedChannels);
       
       return {
         messages: updatedMessages,
@@ -142,6 +193,9 @@ export const useStore = create<AppState>((set, get) => ({
         : ch
     );
     
+    saveToStorage('messages', updatedMessages);
+    saveToStorage('channels', updatedChannels);
+    
     return {
       messages: updatedMessages,
       channels: updatedChannels
@@ -154,20 +208,38 @@ export const useStore = create<AppState>((set, get) => ({
       id: uuidv4(),
       uploadedAt: Date.now()
     };
-    set((state) => ({ files: [...state.files, newFile] }));
+    set((state) => {
+      const newFiles = [...state.files, newFile];
+      saveToStorage('files', newFiles);
+      return { files: newFiles };
+    });
   },
 
-  deleteFile: (id) => set((state) => ({
-    files: state.files.filter((f) => f.id !== id)
-  })),
+  deleteFile: (id) => set((state) => {
+    const newFiles = state.files.filter((f) => f.id !== id);
+    saveToStorage('files', newFiles);
+    return { files: newFiles };
+  }),
 
-  confirmFile: (fileId, userId) => set((state) => ({
-    files: state.files.map((f) =>
+  confirmFile: (fileId, userId) => set((state) => {
+    const newFiles = state.files.map((f) =>
       f.id === fileId && !f.confirmedBy.includes(userId)
         ? { ...f, confirmedBy: [...f.confirmedBy, userId] }
         : f
-    )
-  })),
+    );
+    saveToStorage('files', newFiles);
+    return { files: newFiles };
+  }),
+
+  cleanupExpiredFiles: () => set((state) => {
+    const now = Date.now();
+    const newFiles = state.files.filter((f) => f.expiredAt > now);
+    const removedCount = state.files.length - newFiles.length;
+    if (removedCount > 0) {
+      saveToStorage('files', newFiles);
+    }
+    return { files: newFiles };
+  }),
 
   addTask: (taskData) => {
     const newTask: Task = {
@@ -175,11 +247,15 @@ export const useStore = create<AppState>((set, get) => ({
       id: uuidv4(),
       createdAt: Date.now()
     };
-    set((state) => ({ tasks: [...state.tasks, newTask] }));
+    set((state) => {
+      const newTasks = [...state.tasks, newTask];
+      saveToStorage('tasks', newTasks);
+      return { tasks: newTasks };
+    });
   },
 
-  updateTask: (id, updates) => set((state) => ({
-    tasks: state.tasks.map((t) =>
+  updateTask: (id, updates) => set((state) => {
+    const newTasks = state.tasks.map((t) =>
       t.id === id
         ? { 
             ...t, 
@@ -187,27 +263,60 @@ export const useStore = create<AppState>((set, get) => ({
             completedAt: updates.status === 'completed' ? Date.now() : t.completedAt
           }
         : t
-    )
-  })),
+    );
+    saveToStorage('tasks', newTasks);
+    return { tasks: newTasks };
+  }),
 
-  deleteTask: (id) => set((state) => ({
-    tasks: state.tasks.filter((t) => t.id !== id)
-  })),
+  deleteTask: (id) => set((state) => {
+    const newTasks = state.tasks.filter((t) => t.id !== id);
+    saveToStorage('tasks', newTasks);
+    return { tasks: newTasks };
+  }),
 
-  updateMemberStatus: (memberId, status) => set((state) => ({
-    members: state.members.map((m) =>
+  updateMemberStatus: (memberId, status) => set((state) => {
+    const newMembers = state.members.map((m) =>
       m.id === memberId
         ? { ...m, status, lastSeen: Date.now() }
         : m
-    ),
-    currentUser: state.currentUser.id === memberId
+    );
+    const newCurrentUser = state.currentUser.id === memberId
       ? { ...state.currentUser, status, lastSeen: Date.now() }
-      : state.currentUser
-  })),
+      : state.currentUser;
+    saveToStorage('members', newMembers);
+    saveToStorage('currentUser', newCurrentUser);
+    return {
+      members: newMembers,
+      currentUser: newCurrentUser
+    };
+  }),
 
-  setSettings: (settings) => set((state) => ({
-    settings: { ...state.settings, ...settings }
-  })),
+  setSettings: (settings) => set((state) => {
+    const newSettings = { ...state.settings, ...settings };
+    saveToStorage('settings', newSettings);
+    return { settings: newSettings };
+  }),
 
-  setConnectionStatus: (status) => set({ connectionStatus: status })
+  setConnectionStatus: (status) => set({ connectionStatus: status }),
+
+  resetToDemo: () => {
+    localStorage.removeItem(STORAGE_PREFIX + 'channels');
+    localStorage.removeItem(STORAGE_PREFIX + 'messages');
+    localStorage.removeItem(STORAGE_PREFIX + 'files');
+    localStorage.removeItem(STORAGE_PREFIX + 'tasks');
+    localStorage.removeItem(STORAGE_PREFIX + 'members');
+    localStorage.removeItem(STORAGE_PREFIX + 'currentUser');
+    localStorage.removeItem(STORAGE_PREFIX + 'settings');
+    
+    set({
+      currentUser: currentUser,
+      currentChannel: null,
+      channels: initialChannels,
+      messages: initialMessages,
+      members: initialMembers,
+      files: initialFiles,
+      tasks: initialTasks,
+      settings: initialSettings
+    });
+  }
 }));

@@ -1,33 +1,64 @@
-import { useState } from 'react';
-import { Plus, MoreVertical, Clock, User, AlertCircle, CheckCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, MoreVertical, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { useStore } from '../../store';
 import { Task } from '../../types';
-import { formatTaskDueDate, formatDateTime } from '../../utils/dateUtils';
 import TaskDetail from './TaskDetail';
 
 export default function KanbanBoard() {
   const { tasks, channels, members, currentUser, updateTask, addTask } = useStore();
+  const [, setForceUpdate] = useState(0);
+  
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<Task['status'] | null>(null);
+  
+  useEffect(() => {
+    if (selectedTask) {
+      const updatedTask = tasks.find(t => t.id === selectedTask.id);
+      if (updatedTask && updatedTask.status !== selectedTask.status) {
+        setSelectedTask(updatedTask);
+      }
+    }
+  }, [tasks]);
   
   const todoTasks = tasks.filter(t => t.status === 'todo');
   const inProgressTasks = tasks.filter(t => t.status === 'inProgress');
   const completedTasks = tasks.filter(t => t.status === 'completed');
   
-  const handleDragStart = (task: Task) => {
+  const handleDragStart = (e: React.DragEvent, task: Task) => {
     setDraggedTask(task);
+    e.dataTransfer.effectAllowed = 'move';
   };
   
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent, status: Task['status']) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverColumn(status);
   };
   
-  const handleDrop = (status: Task['status']) => {
+  const handleDragLeave = () => {
+    setDragOverColumn(null);
+  };
+  
+  const handleDrop = (e: React.DragEvent, status: Task['status']) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+    
     if (draggedTask && draggedTask.status !== status) {
       updateTask(draggedTask.id, { status });
+      
+      if (selectedTask?.id === draggedTask.id) {
+        const updatedTask = { ...selectedTask, status };
+        setSelectedTask(updatedTask);
+      }
     }
     setDraggedTask(null);
+  };
+  
+  const handleDragEnd = () => {
+    setDraggedTask(null);
+    setDragOverColumn(null);
   };
   
   const getPriorityColor = (priority: Task['priority']) => {
@@ -53,18 +84,22 @@ export default function KanbanBoard() {
   const renderTaskCard = (task: Task) => {
     const assignee = getAssignee(task.assigneeId);
     const channel = channels.find(ch => ch.id === task.channelId);
+    const isSelected = selectedTask?.id === task.id;
     
     return (
       <div
         key={task.id}
         draggable
-        onDragStart={() => handleDragStart(task)}
+        onDragStart={(e) => handleDragStart(e, task)}
+        onDragEnd={handleDragEnd}
         onClick={() => setSelectedTask(task)}
-        className="bg-[#2C3E50] rounded-lg p-3 cursor-pointer hover:bg-[#34495E] transition-colors border-l-4 ${
+        className={`bg-[#2C3E50] rounded-lg p-3 cursor-pointer hover:bg-[#34495E] transition-all border-l-4 ${
           task.priority === 'urgent' ? 'border-red-500' :
           task.priority === 'important' ? 'border-orange-500' :
           'border-blue-500'
-        } ${draggedTask?.id === task.id ? 'opacity-50' : ''}"
+        } ${draggedTask?.id === task.id ? 'opacity-50' : ''} ${
+          isSelected ? 'ring-2 ring-[#E67E22]' : ''
+        }`}
       >
         <div className="flex items-start justify-between gap-2 mb-2">
           <h4 className="text-sm font-medium text-white flex-1">{task.title}</h4>
@@ -120,26 +155,46 @@ export default function KanbanBoard() {
     );
   };
   
-  const renderColumn = (title: string, tasks: Task[], color: string, icon: any) => (
+  const formatTaskDueDate = (timestamp: number): string => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0) {
+      return `已逾期 ${Math.abs(diffDays)} 天`;
+    }
+    if (diffDays === 0) {
+      return '今天截止';
+    }
+    if (diffDays === 1) {
+      return '明天截止';
+    }
+    return `${diffDays}天后截止`;
+  };
+  
+  const renderColumn = (title: string, columnTasks: Task[], status: Task['status'], color: string) => (
     <div
-      onDragOver={handleDragOver}
-      onDrop={() => handleDrop(tasks[0]?.status || 'todo')}
-      className="flex-1 min-w-[300px] bg-[#1E3A5F]/30 rounded-lg p-4"
+      onDragOver={(e) => handleDragOver(e, status)}
+      onDragLeave={handleDragLeave}
+      onDrop={(e) => handleDrop(e, status)}
+      className={`flex-1 min-w-[300px] bg-[#1E3A5F]/30 rounded-lg p-4 transition-all ${
+        dragOverColumn === status ? 'ring-2 ring-[#E67E22] ring-opacity-50' : ''
+      }`}
     >
       <div className="flex items-center gap-2 mb-4">
         <div className={`w-2 h-2 rounded-full ${color}`}></div>
         <h3 className="text-sm font-semibold text-white">{title}</h3>
         <span className="px-2 py-0.5 text-xs bg-[#2C3E50] text-gray-400 rounded-full">
-          {tasks.length}
+          {columnTasks.length}
         </span>
       </div>
       
-      <div className="space-y-3">
-        {tasks.map(task => renderTaskCard(task))}
+      <div className="space-y-3 min-h-[200px]">
+        {columnTasks.map(task => renderTaskCard(task))}
         
-        {tasks.length === 0 && (
-          <div className="text-center py-8 text-gray-500 text-sm">
-            暂无任务
+        {columnTasks.length === 0 && (
+          <div className="flex items-center justify-center h-32 border-2 border-dashed border-[#34495E] rounded-lg text-gray-500 text-sm">
+            拖拽任务到这里
           </div>
         )}
       </div>
@@ -166,9 +221,9 @@ export default function KanbanBoard() {
       
       <div className="flex-1 overflow-x-auto p-6">
         <div className="flex gap-6 h-full min-w-max">
-          {renderColumn('待处理', todoTasks, 'bg-gray-400', Clock)}
-          {renderColumn('进行中', inProgressTasks, 'bg-blue-400', AlertCircle)}
-          {renderColumn('已完成', completedTasks, 'bg-green-400', CheckCircle)}
+          {renderColumn('待处理', todoTasks, 'todo', 'bg-gray-400')}
+          {renderColumn('进行中', inProgressTasks, 'inProgress', 'bg-blue-400')}
+          {renderColumn('已完成', completedTasks, 'completed', 'bg-green-400')}
         </div>
       </div>
       
@@ -180,6 +235,7 @@ export default function KanbanBoard() {
         <TaskDetail
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
+          onUpdate={setSelectedTask}
         />
       )}
     </div>

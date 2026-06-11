@@ -1,14 +1,32 @@
-import { X, Clock, User, AlertCircle, CheckCircle, Trash2, Edit2 } from 'lucide-react';
+import { X, Clock, User, CheckCircle, Trash2, Edit2 } from 'lucide-react';
 import { useStore } from '../../store';
 import { Task } from '../../types';
-import { formatDateTime, formatTaskDueDate } from '../../utils/dateUtils';
+import { formatDateTime } from '../../utils/dateUtils';
 
 interface TaskDetailProps {
   task: Task;
   onClose: () => void;
+  onUpdate?: (task: Task) => void;
 }
 
-export default function TaskDetail({ task, onClose }: TaskDetailProps) {
+const formatTaskDueDate = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffDays = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  
+  if (diffDays < 0) {
+    return `已逾期 ${Math.abs(diffDays)} 天`;
+  }
+  if (diffDays === 0) {
+    return '今天截止';
+  }
+  if (diffDays === 1) {
+    return '明天截止';
+  }
+  return `${diffDays}天后截止`;
+};
+
+export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps) {
   const { channels, members, updateTask, deleteTask, currentUser } = useStore();
   
   const channel = channels.find(ch => ch.id === task.channelId);
@@ -17,6 +35,9 @@ export default function TaskDetail({ task, onClose }: TaskDetailProps) {
   
   const handleStatusChange = (newStatus: Task['status']) => {
     updateTask(task.id, { status: newStatus });
+    if (onUpdate) {
+      onUpdate({ ...task, status: newStatus });
+    }
   };
   
   const handleDelete = () => {
@@ -132,7 +153,7 @@ export default function TaskDetail({ task, onClose }: TaskDetailProps) {
                   : 'bg-[#2C3E50] text-gray-300 hover:bg-[#34495E] border-2 border-transparent'
               }`}
             >
-              <AlertCircle className="w-4 h-4" />
+              <div className="w-2 h-2 rounded-full bg-blue-400"></div>
               <span className="text-sm font-medium">进行中</span>
             </button>
             
