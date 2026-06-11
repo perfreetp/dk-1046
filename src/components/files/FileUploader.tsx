@@ -56,7 +56,8 @@ export default function FileUploader() {
             : currentChannel.members,
           confirmedBy: [],
           expiredAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-          url
+          url,
+          content: url
         });
       };
       reader.readAsDataURL(file);

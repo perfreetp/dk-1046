@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, Mic, Image, X, StopCircle, Play, Pause } from 'lucide-react';
 import { useStore } from '../../store';
 import { useAudioRecorder, formatDuration } from '../../hooks/useAudioRecorder';
+import { saveVoiceMessage } from '../../utils/indexedDB';
 
 export default function MessageInput() {
   const { currentChannel, currentUser, members, addMessage } = useStore();
@@ -64,23 +65,29 @@ export default function MessageInput() {
     setShowMention(false);
   };
   
-  const handleSendVoice = () => {
-    if (!audioUrl || !currentChannel) return;
-    
-    addMessage({
-      channelId: currentChannel.id,
-      senderId: currentUser.id,
-      type: 'voice',
-      content: `语音留言 (${formatDuration(duration)})`,
-      mentions: [],
-      attachmentUrl: audioUrl,
-      duration: duration
-    });
-    
-    cancelRecording();
-    setInputValue('');
-    setShowMention(false);
-  };
+  const handleSendVoice = async () => {
+     if (!audioUrl || !currentChannel) return;
+     
+     const messageId = crypto.randomUUID();
+     
+     if (audioBlob) {
+       await saveVoiceMessage(messageId, audioBlob);
+     }
+     
+     addMessage({
+       channelId: currentChannel.id,
+       senderId: currentUser.id,
+       type: 'voice',
+       content: `语音留言 (${formatDuration(duration)})`,
+       mentions: [],
+       attachmentUrl: audioUrl,
+       duration: duration
+     });
+     
+     cancelRecording();
+     setInputValue('');
+     setShowMention(false);
+   };
   
   const handleCancelVoice = () => {
     cancelRecording();

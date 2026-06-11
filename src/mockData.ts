@@ -264,7 +264,25 @@ export const mockTasks: Task[] = [
     status: 'completed',
     dueDate: Date.now() - 1800000,
     createdAt: Date.now() - 3600000,
-    completedAt: Date.now() - 2400000
+    completedAt: Date.now() - 2400000,
+    activities: [
+      {
+        id: 'activity-1',
+        taskId: 'task-1',
+        type: 'created',
+        description: '创建了任务',
+        performedBy: 'user-3',
+        performedAt: Date.now() - 3600000
+      },
+      {
+        id: 'activity-2',
+        taskId: 'task-1',
+        type: 'completed',
+        description: '将状态改为"已完成"',
+        performedBy: 'user-3',
+        performedAt: Date.now() - 2400000
+      }
+    ]
   },
   {
     id: 'task-2',
@@ -275,7 +293,25 @@ export const mockTasks: Task[] = [
     priority: 'urgent',
     status: 'inProgress',
     dueDate: Date.now() + 7200000,
-    createdAt: Date.now() - 3600000
+    createdAt: Date.now() - 3600000,
+    activities: [
+      {
+        id: 'activity-3',
+        taskId: 'task-2',
+        type: 'created',
+        description: '创建了任务',
+        performedBy: 'user-2',
+        performedAt: Date.now() - 3600000
+      },
+      {
+        id: 'activity-4',
+        taskId: 'task-2',
+        type: 'status_changed',
+        description: '将状态改为"进行中"',
+        performedBy: 'user-2',
+        performedAt: Date.now() - 1800000
+      }
+    ]
   },
   {
     id: 'task-3',
@@ -286,7 +322,17 @@ export const mockTasks: Task[] = [
     priority: 'important',
     status: 'todo',
     dueDate: Date.now() + 86400000,
-    createdAt: Date.now() - 1800000
+    createdAt: Date.now() - 1800000,
+    activities: [
+      {
+        id: 'activity-5',
+        taskId: 'task-3',
+        type: 'created',
+        description: '创建了任务',
+        performedBy: 'user-2',
+        performedAt: Date.now() - 1800000
+      }
+    ]
   },
   {
     id: 'task-4',
@@ -297,7 +343,17 @@ export const mockTasks: Task[] = [
     priority: 'important',
     status: 'todo',
     dueDate: Date.now() + 432000000,
-    createdAt: Date.now() - 86400000
+    createdAt: Date.now() - 86400000,
+    activities: [
+      {
+        id: 'activity-6',
+        taskId: 'task-4',
+        type: 'created',
+        description: '创建了任务',
+        performedBy: 'user-3',
+        performedAt: Date.now() - 86400000
+      }
+    ]
   },
   {
     id: 'task-5',
@@ -308,6 +364,24 @@ export const mockTasks: Task[] = [
     priority: 'normal',
     status: 'inProgress',
     dueDate: Date.now() + 172800000,
-    createdAt: Date.now() - 172800000
+    createdAt: Date.now() - 172800000,
+    activities: [
+      {
+        id: 'activity-7',
+        taskId: 'task-5',
+        type: 'created',
+        description: '创建了任务',
+        performedBy: 'user-2',
+        performedAt: Date.now() - 172800000
+      },
+      {
+        id: 'activity-8',
+        taskId: 'task-5',
+        type: 'status_changed',
+        description: '将状态改为"进行中"',
+        performedBy: 'user-2',
+        performedAt: Date.now() - 86400000
+      }
+    ]
   }
 ];

@@ -2,20 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { formatMessageTime } from '../../utils/dateUtils';
 import { Message } from '../../types';
-import { Check, CheckCheck, Image, FileText, Mic, AtSign, Play, Pause, Download, MoreVertical, CheckSquare, X } from 'lucide-react';
+import { Check, CheckCheck, Image, FileText, Mic, AtSign, Play, Pause, Download, MoreVertical, CheckSquare, X, Activity } from 'lucide-react';
 import { exportChannelMessages } from '../../utils/exportUtils';
 
 export default function MessagePanel() {
-  const { currentChannel, messages, members, currentUser, markAsRead } = useStore();
+  const { currentChannel, messages, members, currentUser, markAsRead, channelActivities } = useStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const highlightedMessageRef = useRef<string | null>(null);
   
   const channelMessages = currentChannel 
     ? messages[currentChannel.id] || [] 
     : [];
   
+  const activities = currentChannel 
+    ? channelActivities[currentChannel.id] || [] 
+    : [];
+  
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [channelMessages]);
+  }, [channelMessages, activities]);
   
   useEffect(() => {
     if (currentChannel && channelMessages.length > 0) {
@@ -51,19 +56,7 @@ export default function MessagePanel() {
   
   const getMember = (memberId: string) => members.find(m => m.id === memberId);
   
-  const getMessageIcon = (type: Message['type']) => {
-    switch (type) {
-      case 'image': return <Image className="w-4 h-4" />;
-      case 'file': return <FileText className="w-4 h-4" />;
-      case 'voice': return <Mic className="w-4 h-4" />;
-      default: return null;
-    }
-  };
-  
-  const isReadByAll = (msg: Message) => {
-    const allMembers = currentChannel.members;
-    return allMembers.every(memberId => msg.readBy.includes(memberId));
-  };
+  const sortedActivities = [...activities].sort((a, b) => b.performedAt - a.performedAt).slice(0, 5);
   
   return (
     <div className="flex-1 flex flex-col bg-[#0F1419]">
@@ -89,29 +82,54 @@ export default function MessagePanel() {
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {channelMessages.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-500">暂无消息，发送第一条消息开始对话</p>
+      <div className="flex-1 overflow-y-auto p-6">
+        {sortedActivities.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
+              <Activity className="w-4 h-4" />
+              <span>频道动态</span>
+            </div>
+            {sortedActivities.map(activity => {
+              const performer = getMember(activity.performedBy);
+              return (
+                <div key={activity.id} className="flex items-center gap-2 text-xs text-gray-400 bg-[#1E3A5F]/50 rounded px-3 py-2">
+                  <span className="text-orange-400">{performer?.name || '成员'}</span>
+                  <span>{activity.description}</span>
+                  <span className="ml-auto text-gray-500">{formatMessageTime(activity.performedAt)}</span>
+                </div>
+              );
+            })}
           </div>
-        ) : (
-          channelMessages.map(message => {
-            const sender = getMember(message.senderId);
-            const isOwnMessage = message.senderId === currentUser.id;
-            
-            return (
-              <MessageItem
-                key={message.id}
-                message={message}
-                sender={sender}
-                isOwnMessage={isOwnMessage}
-                isReadByAll={isReadByAll(message)}
-                currentChannel={currentChannel}
-                members={members}
-              />
-            );
-          })
         )}
+        
+        <div className="space-y-4">
+          {channelMessages.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500">暂无消息，发送第一条消息开始对话</p>
+            </div>
+          ) : (
+            channelMessages.map(message => {
+              const sender = getMember(message.senderId);
+              const isOwnMessage = message.senderId === currentUser.id;
+              const isHighlighted = highlightedMessageRef.current === message.id;
+              
+              return (
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  sender={sender}
+                  isOwnMessage={isOwnMessage}
+                  isHighlighted={isHighlighted}
+                  currentChannel={currentChannel}
+                  members={members}
+                  onHighlight={() => {
+                    highlightedMessageRef.current = message.id;
+                  }}
+                />
+              );
+            })
+          )}
+        </div>
         <div ref={messagesEndRef} />
       </div>
     </div>
@@ -122,15 +140,16 @@ interface MessageItemProps {
   message: Message;
   sender: any;
   isOwnMessage: boolean;
-  isReadByAll: boolean;
+  isHighlighted?: boolean;
   currentChannel: any;
   members: any[];
+  onHighlight: () => void;
 }
 
-function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChannel, members }: MessageItemProps) {
+function MessageItem({ message, sender, isOwnMessage, isHighlighted, currentChannel, members, onHighlight }: MessageItemProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
-  const { addTask, addTaskActivity, linkMessageToTask, currentUser } = useStore();
+  const { addTask, addTaskActivity, linkMessageToTask, currentUser, members: allMembers, channels } = useStore();
   
   const getMessageIcon = (type: Message['type']) => {
     switch (type) {
@@ -144,6 +163,7 @@ function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChanne
   const handleConvertToTask = () => {
     setShowMenu(false);
     setShowCreateTask(true);
+    onHighlight();
   };
   
   const handleCreateTask = (taskData: any) => {
@@ -154,12 +174,20 @@ function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChanne
       assigneeId: taskData.assigneeId,
       priority: taskData.priority,
       status: 'todo',
-      dueDate: Date.now() + 86400000
+      dueDate: Date.now() + 86400000,
+      sourceMessageInfo: {
+        messageId: message.id,
+        channelId: currentChannel.id,
+        channelName: currentChannel.name,
+        content: message.content,
+        senderId: message.senderId,
+        senderName: sender?.name || '未知',
+        mentions: message.mentions,
+        createdAt: message.createdAt
+      }
     });
     
-    if (newTaskId && message.mentions.length > 0) {
-      linkMessageToTask(newTaskId, message.id, currentChannel.id);
-    }
+    linkMessageToTask(newTaskId, message.id, currentChannel.id);
     
     setShowCreateTask(false);
   };
@@ -167,7 +195,8 @@ function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChanne
   return (
     <>
       <div
-        className={`flex gap-3 ${isOwnMessage ? 'flex-row-reverse' : ''}`}
+        data-message-id={message.id}
+        className={`flex gap-3 ${isOwnMessage ? 'flex-row-reverse' : ''} ${isHighlighted ? 'ring-2 ring-yellow-400 rounded-lg p-2' : ''}`}
         onContextMenu={(e) => {
           e.preventDefault();
           setShowMenu(true);
@@ -249,9 +278,7 @@ function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChanne
           
           <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : ''}`}>
             {isOwnMessage && (
-              isReadByAll ? (
-                <CheckCheck className="w-4 h-4 text-green-400" />
-              ) : message.readBy.length > 1 ? (
+              isOwnMessage ? (
                 <CheckCheck className="w-4 h-4 text-gray-400" />
               ) : (
                 <Check className="w-4 h-4 text-gray-400" />
@@ -274,6 +301,7 @@ function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChanne
       {showCreateTask && (
         <CreateTaskFromMessage
           message={message}
+          sender={sender}
           onClose={() => setShowCreateTask(false)}
           onCreate={handleCreateTask}
         />
@@ -285,9 +313,28 @@ function MessageItem({ message, sender, isOwnMessage, isReadByAll, currentChanne
 function VoiceMessage({ message }: { message: Message }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   
   const duration = message.duration || 0;
+  
+  useEffect(() => {
+    const loadAudioFromIndexedDB = async () => {
+      if (message.type === 'voice' && message.attachmentUrl) {
+        const { indexedDBManager } = await import('../../utils/indexedDB');
+        const cached = await indexedDBManager.getAudio(message.id);
+        if (cached) {
+          setAudioSrc(cached.url);
+        } else if (message.attachmentUrl.startsWith('blob:')) {
+          setAudioSrc(message.attachmentUrl);
+        } else {
+          setAudioSrc(message.attachmentUrl);
+        }
+      }
+    };
+    
+    loadAudioFromIndexedDB();
+  }, [message.id, message.attachmentUrl, message.type]);
   
   useEffect(() => {
     const audio = audioRef.current;
@@ -306,7 +353,7 @@ function VoiceMessage({ message }: { message: Message }) {
       audio.removeEventListener('timeupdate', updateTime);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, []);
+  }, [audioSrc]);
   
   const togglePlay = () => {
     if (audioRef.current) {
@@ -329,11 +376,12 @@ function VoiceMessage({ message }: { message: Message }) {
   
   return (
     <div className="flex items-center gap-3 min-w-[200px]">
-      <audio ref={audioRef} src={message.attachmentUrl} />
+      {audioSrc && <audio ref={audioRef} src={audioSrc} />}
       
       <button
         onClick={togglePlay}
-        className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors flex-shrink-0"
+        disabled={!audioSrc}
+        className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isPlaying ? (
           <Pause className="w-5 h-5 text-white" />
@@ -358,8 +406,9 @@ function VoiceMessage({ message }: { message: Message }) {
   );
 }
 
-function CreateTaskFromMessage({ message, onClose, onCreate }: {
+function CreateTaskFromMessage({ message, sender, onClose, onCreate }: {
   message: Message;
+  sender: any;
   onClose: () => void;
   onCreate: (data: any) => void;
 }) {
@@ -396,11 +445,21 @@ function CreateTaskFromMessage({ message, onClose, onCreate }: {
         
         <div className="mb-4 p-3 bg-[#2C3E50] rounded-lg">
           <p className="text-sm text-gray-300 line-clamp-3">{message.content}</p>
-          {mentionedMembers.length > 0 && (
-            <p className="text-xs text-orange-400 mt-2">
-              @提及: {mentionedMembers.map(m => m?.name).join(', ')}
-            </p>
-          )}
+          <div className="mt-2 pt-2 border-t border-[#34495E] flex items-center justify-between">
+            <span className="text-xs text-gray-400">
+              发送者: {sender?.name || '未知'} • {formatMessageTime(message.createdAt)}
+            </span>
+            {mentionedMembers.length > 0 && (
+              <span className="text-xs text-orange-400">
+                @提及: {mentionedMembers.map(m => m?.name).join(', ')}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded">
+              频道: {currentChannel?.name}
+            </span>
+          </div>
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-4">

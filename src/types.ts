@@ -47,12 +47,14 @@ export interface FileItem {
   confirmedBy: string[];
   expiredAt: number;
   url: string;
+  content?: string;
+  contentUrl?: string;
 }
 
 export interface TaskActivity {
   id: string;
   taskId: string;
-  type: 'created' | 'status_changed' | 'assigned' | 'priority_changed' | 'file_attached' | 'message_linked' | 'completed' | 'updated';
+  type: 'created' | 'status_changed' | 'assigned' | 'priority_changed' | 'file_attached' | 'message_linked' | 'completed' | 'updated' | 'file_confirmed';
   description: string;
   performedBy: string;
   performedAt: number;
@@ -60,8 +62,11 @@ export interface TaskActivity {
   newValue?: string;
   metadata?: {
     fileId?: string;
+    fileName?: string;
     messageId?: string;
     channelId?: string;
+    channelName?: string;
+    messageContent?: string;
   };
 }
 
@@ -76,9 +81,29 @@ export interface Task {
   dueDate: number;
   createdAt: number;
   completedAt?: number;
-  activities?: TaskActivity[];
+  activities: TaskActivity[];
   linkedMessageId?: string;
   linkedFileIds?: string[];
+  sourceMessageInfo?: {
+    messageId: string;
+    channelId: string;
+    channelName: string;
+    content: string;
+    senderId: string;
+    senderName: string;
+    mentions: string[];
+    createdAt: number;
+  };
+}
+
+export interface ChannelActivity {
+  id: string;
+  channelId: string;
+  type: 'task_created' | 'task_status_changed' | 'task_assigned' | 'task_completed' | 'task_updated';
+  description: string;
+  relatedTaskId?: string;
+  performedBy: string;
+  performedAt: number;
 }
 
 export interface AppSettings {

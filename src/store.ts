@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Member, Channel, Message, FileItem, Task, AppSettings, TaskActivity } from './types';
+import { Member, Channel, Message, FileItem, Task, AppSettings, TaskActivity, ChannelActivity } from './types';
 import { 
   mockMembers, 
   mockChannels, 
@@ -39,6 +39,7 @@ interface AppState {
   tasks: Task[];
   settings: AppSettings;
   connectionStatus: 'connected' | 'disconnected' | 'syncing';
+  channelActivities: Record<string, ChannelActivity[]>;
   
   setCurrentChannel: (channel: Channel | null) => void;
   addChannel: (channel: Omit<Channel, 'id' | 'createdAt' | 'unreadCount'>) => void;
@@ -46,7 +47,7 @@ interface AppState {
   deleteChannel: (id: string) => void;
   joinChannel: (channelId: string, memberId: string) => void;
   
-  addMessage: (message: Omit<Message, 'id' | 'createdAt' | 'readBy'>) => void;
+  addMessage: (message: Omit<Message, 'id' | 'createdAt' | 'readBy'>) => string;
   markAsRead: (messageId: string, channelId: string, userId: string) => void;
   
   addFile: (file: Omit<FileItem, 'id' | 'uploadedAt'>) => void;
@@ -54,7 +55,7 @@ interface AppState {
   confirmFile: (fileId: string, userId: string) => void;
   cleanupExpiredFiles: () => void;
   
-  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'activities'>) => void;
+  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'activities'>) => string;
   updateTask: (id: string, updates: Partial<Task>) => void;
   deleteTask: (id: string) => void;
   addTaskActivity: (taskId: string, activity: Omit<TaskActivity, 'id' | 'taskId' | 'performedAt'>) => void;
@@ -90,6 +91,7 @@ export const useStore = create<AppState>((set, get) => ({
   tasks: loadFromStorage('tasks', initialTasks),
   settings: loadFromStorage('settings', initialSettings),
   connectionStatus: 'connected',
+  channelActivities: loadFromStorage('channelActivities', {}),
 
   setCurrentChannel: (channel) => set({ currentChannel: channel }),
 
@@ -128,11 +130,15 @@ export const useStore = create<AppState>((set, get) => ({
     const newChannels = state.channels.filter((ch) => ch.id !== id);
     const newMessages = { ...state.messages };
     delete newMessages[id];
+    const newChannelActivities = { ...state.channelActivities };
+    delete newChannelActivities[id];
     saveToStorage('channels', newChannels);
     saveToStorage('messages', newMessages);
+    saveToStorage('channelActivities', newChannelActivities);
     return {
       channels: newChannels,
       messages: newMessages,
+      channelActivities: newChannelActivities,
       currentChannel: state.currentChannel?.id === id ? null : state.currentChannel
     };
   }),
@@ -148,9 +154,10 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   addMessage: (messageData) => {
+    const messageId = uuidv4();
     const newMessage: Message = {
       ...messageData,
-      id: uuidv4(),
+      id: messageId,
       createdAt: Date.now(),
       readBy: [messageData.senderId]
     };
@@ -176,6 +183,8 @@ export const useStore = create<AppState>((set, get) => ({
         channels: updatedChannels
       };
     });
+    
+    return messageId;
   },
 
   markAsRead: (messageId, channelId, userId) => set((state) => {
@@ -224,11 +233,33 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   confirmFile: (fileId, userId) => set((state) => {
+    const file = state.files.find(f => f.id === fileId);
     const newFiles = state.files.map((f) =>
       f.id === fileId && !f.confirmedBy.includes(userId)
         ? { ...f, confirmedBy: [...f.confirmedBy, userId] }
         : f
     );
+    
+    if (file && !file.confirmedBy.includes(userId)) {
+      const member = state.members.find(m => m.id === userId);
+      const activity: ChannelActivity = {
+        id: uuidv4(),
+        channelId: file.channelId,
+        type: 'task_updated',
+        description: `${member?.name || '成员'}确认接收了文件"${file.name}"`,
+        performedBy: userId,
+        performedAt: Date.now()
+      };
+      
+      const channelActivities = {
+        ...state.channelActivities,
+        [file.channelId]: [...(state.channelActivities[file.channelId] || []), activity]
+      };
+      saveToStorage('channelActivities', channelActivities);
+      
+      set({ channelActivities });
+    }
+    
     saveToStorage('files', newFiles);
     return { files: newFiles };
   }),
@@ -244,33 +275,58 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   addTask: (taskData) => {
+    const taskId = uuidv4();
+    const { currentUser, members, channels } = get();
+    
+    const taskCreator = members.find(m => m.id === taskData.assigneeId) || currentUser;
+    const channel = channels.find(c => c.id === taskData.channelId);
+    
+    const initialActivity: TaskActivity = {
+      id: uuidv4(),
+      taskId,
+      type: 'created',
+      description: `创建了任务`,
+      performedBy: taskData.assigneeId,
+      performedAt: Date.now()
+    };
+    
     const newTask: Task = {
       ...taskData,
-      id: uuidv4(),
+      id: taskId,
       createdAt: Date.now(),
-      activities: [{
-        id: uuidv4(),
-        taskId: '',
-        type: 'created',
-        description: `创建了任务`,
-        performedBy: taskData.assigneeId,
-        performedAt: Date.now()
-      }]
+      activities: [initialActivity]
     };
-    newTask.activities![0].taskId = newTask.id;
     
     set((state) => {
       const newTasks = [...state.tasks, newTask];
       saveToStorage('tasks', newTasks);
-      return { tasks: newTasks };
+      
+      const channelActivity: ChannelActivity = {
+        id: uuidv4(),
+        channelId: taskData.channelId,
+        type: 'task_created',
+        description: `${taskCreator.name}创建了待办"${taskData.title}"`,
+        relatedTaskId: taskId,
+        performedBy: taskData.assigneeId,
+        performedAt: Date.now()
+      };
+      
+      const channelActivities = {
+        ...state.channelActivities,
+        [taskData.channelId]: [...(state.channelActivities[taskData.channelId] || []), channelActivity]
+      };
+      saveToStorage('channelActivities', channelActivities);
+      
+      return { tasks: newTasks, channelActivities };
     });
     
-    return newTask.id;
+    return taskId;
   },
 
   updateTask: (id, updates) => set((state) => {
     const task = state.tasks.find(t => t.id === id);
     const newActivities = [...(task?.activities || [])];
+    let channelActivity: ChannelActivity | null = null;
     
     if (updates.status && updates.status !== task?.status) {
       const statusLabels: Record<string, string> = {
@@ -278,14 +334,27 @@ export const useStore = create<AppState>((set, get) => ({
         'inProgress': '进行中',
         'completed': '已完成'
       };
+      
+      const activityType = updates.status === 'completed' ? 'completed' : 'status_changed';
       newActivities.push({
         id: uuidv4(),
         taskId: id,
-        type: updates.status === 'completed' ? 'completed' : 'status_changed',
+        type: activityType,
         description: `将状态改为"${statusLabels[updates.status]}"`,
         performedBy: state.currentUser.id,
         performedAt: Date.now()
       });
+      
+      const member = state.members.find(m => m.id === state.currentUser.id);
+      channelActivity = {
+        id: uuidv4(),
+        channelId: task!.channelId,
+        type: updates.status === 'completed' ? 'task_completed' : 'task_status_changed',
+        description: `${member?.name || '成员'}${updates.status === 'completed' ? '完成了' : '更新了'}待办"${task?.title}"${updates.status !== 'completed' ? `至"${statusLabels[updates.status]}"` : ''}`,
+        relatedTaskId: id,
+        performedBy: state.currentUser.id,
+        performedAt: Date.now()
+      };
     }
     
     if (updates.assigneeId && updates.assigneeId !== task?.assigneeId) {
@@ -301,6 +370,17 @@ export const useStore = create<AppState>((set, get) => ({
         previousValue: oldAssignee?.name,
         newValue: newAssignee?.name
       });
+      
+      const member = state.members.find(m => m.id === state.currentUser.id);
+      channelActivity = {
+        id: uuidv4(),
+        channelId: task!.channelId,
+        type: 'task_assigned',
+        description: `${member?.name || '成员'}将待办"${task?.title}"指派给${newAssignee?.name || '未知'}`,
+        relatedTaskId: id,
+        performedBy: state.currentUser.id,
+        performedAt: Date.now()
+      };
     }
     
     if (updates.priority && updates.priority !== task?.priority) {
@@ -319,6 +399,17 @@ export const useStore = create<AppState>((set, get) => ({
         previousValue: priorityLabels[task?.priority || 'normal'],
         newValue: priorityLabels[updates.priority]
       });
+      
+      const member = state.members.find(m => m.id === state.currentUser.id);
+      channelActivity = {
+        id: uuidv4(),
+        channelId: task!.channelId,
+        type: 'task_updated',
+        description: `${member?.name || '成员'}更新了待办"${task?.title}"的优先级为"${priorityLabels[updates.priority]}"`,
+        relatedTaskId: id,
+        performedBy: state.currentUser.id,
+        performedAt: Date.now()
+      };
     }
     
     const newTasks = state.tasks.map((t) =>
@@ -331,7 +422,18 @@ export const useStore = create<AppState>((set, get) => ({
           }
         : t
     );
+    
     saveToStorage('tasks', newTasks);
+    
+    if (channelActivity) {
+      const newChannelActivities = {
+        ...state.channelActivities,
+        [task!.channelId]: [...(state.channelActivities[task!.channelId] || []), channelActivity]
+      };
+      saveToStorage('channelActivities', newChannelActivities);
+      return { tasks: newTasks, channelActivities: newChannelActivities };
+    }
+    
     return { tasks: newTasks };
   }),
 
@@ -349,12 +451,36 @@ export const useStore = create<AppState>((set, get) => ({
       performedAt: Date.now()
     };
     
+    const task = state.tasks.find(t => t.id === taskId);
+    
     const newTasks = state.tasks.map((t) =>
       t.id === taskId
         ? { ...t, activities: [...(t.activities || []), newActivity] }
         : t
     );
+    
     saveToStorage('tasks', newTasks);
+    
+    if (task && activity.type === 'file_attached') {
+      const member = state.members.find(m => m.id === activity.performedBy);
+      const channelActivity: ChannelActivity = {
+        id: uuidv4(),
+        channelId: task.channelId,
+        type: 'task_updated',
+        description: `${member?.name || '成员'}为待办"${task.title}"添加了文件"${activity.metadata?.fileName || '附件'}"`,
+        relatedTaskId: taskId,
+        performedBy: activity.performedBy,
+        performedAt: Date.now()
+      };
+      
+      const newChannelActivities = {
+        ...state.channelActivities,
+        [task.channelId]: [...(state.channelActivities[task.channelId] || []), channelActivity]
+      };
+      saveToStorage('channelActivities', newChannelActivities);
+      return { tasks: newTasks, channelActivities: newChannelActivities };
+    }
+    
     return { tasks: newTasks };
   }),
 
@@ -362,15 +488,29 @@ export const useStore = create<AppState>((set, get) => ({
     const message = state.messages[channelId]?.find(m => m.id === messageId);
     const channel = state.channels.find(c => c.id === channelId);
     const sender = state.members.find(m => m.id === message?.senderId);
+    const task = state.tasks.find(t => t.id === taskId);
+    
+    if (!message || !channel) return state;
+    
+    const sourceMessageInfo = {
+      messageId,
+      channelId,
+      channelName: channel.name,
+      content: message.content,
+      senderId: message.senderId,
+      senderName: sender?.name || '未知',
+      mentions: message.mentions,
+      createdAt: message.createdAt
+    };
     
     const newActivity: TaskActivity = {
       id: uuidv4(),
       taskId,
       type: 'message_linked',
-      description: `关联了来自"${channel?.name}"的消息: "${message?.content?.substring(0, 50)}${message?.content && message.content.length > 50 ? '...' : ''}"`,
+      description: `关联了来自"${channel.name}"的消息: "${message.content?.substring(0, 50)}${message.content && message.content.length > 50 ? '...' : ''}"`,
       performedBy: state.currentUser.id,
       performedAt: Date.now(),
-      metadata: { messageId, channelId }
+      metadata: { messageId, channelId, channelName: channel.name, messageContent: message.content }
     };
     
     const newTasks = state.tasks.map((t) =>
@@ -378,10 +518,12 @@ export const useStore = create<AppState>((set, get) => ({
         ? { 
             ...t, 
             linkedMessageId: messageId,
-            activities: [...(t.activities || []), newActivity]
+            activities: [...(t.activities || []), newActivity],
+            sourceMessageInfo: t.sourceMessageInfo || sourceMessageInfo
           }
         : t
     );
+    
     saveToStorage('tasks', newTasks);
     return { tasks: newTasks };
   }),
@@ -419,6 +561,7 @@ export const useStore = create<AppState>((set, get) => ({
     localStorage.removeItem(STORAGE_PREFIX + 'members');
     localStorage.removeItem(STORAGE_PREFIX + 'currentUser');
     localStorage.removeItem(STORAGE_PREFIX + 'settings');
+    localStorage.removeItem(STORAGE_PREFIX + 'channelActivities');
     
     set({
       currentUser: currentUser,
@@ -428,7 +571,8 @@ export const useStore = create<AppState>((set, get) => ({
       members: initialMembers,
       files: initialFiles,
       tasks: initialTasks,
-      settings: initialSettings
+      settings: initialSettings,
+      channelActivities: {}
     });
   }
 }));

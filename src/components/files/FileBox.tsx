@@ -3,7 +3,7 @@ import { Search, Filter, Download, Trash2, Settings, Save, AlertTriangle, Archiv
 import { useStore } from '../../store';
 import FileItemCard from './FileItem';
 import FileUploader from './FileUploader';
-import { exportChannelArchive, exportFiles } from '../../utils/exportUtils';
+import { exportChannelArchive, exportFiles, getFileBase64 } from '../../utils/exportUtils';
 
 export default function FileBox() {
   const { files, channels, currentChannel, settings, setSettings, cleanupExpiredFiles, messages, tasks, members } = useStore();
@@ -52,7 +52,7 @@ export default function FileBox() {
     }
   };
   
-  const confirmExportArchive = () => {
+  const confirmExportArchive = async () => {
     if (!selectedChannelId) return;
     
     const channel = channels.find(c => c.id === selectedChannelId);
@@ -62,7 +62,7 @@ export default function FileBox() {
     const channelFiles = files.filter(f => f.channelId === selectedChannelId);
     const channelTasks = tasks.filter(t => t.channelId === selectedChannelId);
     
-    exportChannelArchive(channel, channelMessages, channelFiles, channelTasks, members);
+    await exportChannelArchive(channel, channelMessages, channelFiles, channelTasks, members, getFileBase64);
     setShowArchiveModal(false);
   };
   

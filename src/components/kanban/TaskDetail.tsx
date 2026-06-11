@@ -69,7 +69,7 @@ const getActivityColor = (type: TaskActivity['type']) => {
 };
 
 export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps) {
-  const { channels, members, updateTask, deleteTask, currentUser, tasks, setCurrentChannel } = useStore();
+  const { channels, members, updateTask, deleteTask, currentUser, tasks, setCurrentChannel, messages } = useStore();
   const [showSourceMessage, setShowSourceMessage] = useState(false);
   
   const channel = channels.find(ch => ch.id === task.channelId);
@@ -80,12 +80,10 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
     a => a.type === 'message_linked' && a.metadata?.messageId === task.linkedMessageId
   );
   
-  const sourceMessage = linkedMessage?.metadata?.channelId && task.linkedMessageId
-    ? { 
-        message: tasks.find(t => t.id === task.linkedMessageId) ? null : null,
-        channel: channels.find(c => c.id === linkedMessage.metadata?.channelId)
-      }
-    : null;
+  const sourceMessage = task.sourceMessageInfo ? {
+    message: messages[task.sourceMessageInfo.channelId]?.find(m => m.id === task.sourceMessageInfo?.messageId),
+    channel: channels.find(c => c.id === task.sourceMessageInfo?.channelId)
+  } : null;
   
   const handleStatusChange = (newStatus: Task['status']) => {
     updateTask(task.id, { status: newStatus });
@@ -102,10 +100,36 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
   };
   
   const handleViewSourceMessage = () => {
-    if (linkedMessage?.metadata?.channelId) {
+    if (task.sourceMessageInfo) {
+      const targetChannel = channels.find(c => c.id === task.sourceMessageInfo.channelId);
+      if (targetChannel) {
+        setCurrentChannel(targetChannel);
+        setTimeout(() => {
+          const messageElement = document.querySelector(`[data-message-id="${task.sourceMessageInfo?.messageId}"]`);
+          if (messageElement) {
+            messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            messageElement.classList.add('ring-2', 'ring-yellow-400');
+            setTimeout(() => {
+              messageElement.classList.remove('ring-2', 'ring-yellow-400');
+            }, 3000);
+          }
+        }, 100);
+        onClose();
+      }
+    } else if (linkedMessage?.metadata?.channelId) {
       const targetChannel = channels.find(c => c.id === linkedMessage.metadata?.channelId);
       if (targetChannel) {
         setCurrentChannel(targetChannel);
+        setTimeout(() => {
+          const messageElement = document.querySelector(`[data-message-id="${linkedMessage.metadata?.messageId}"]`);
+          if (messageElement) {
+            messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            messageElement.classList.add('ring-2', 'ring-yellow-400');
+            setTimeout(() => {
+              messageElement.classList.remove('ring-2', 'ring-yellow-400');
+            }, 3000);
+          }
+        }, 100);
         onClose();
       }
     }
@@ -294,13 +318,13 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
             </button>
           )}
           
-          {linkedMessage && (
+          {(task.sourceMessageInfo || linkedMessage) && (
             <button
               onClick={handleViewSourceMessage}
               className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 transition-colors"
             >
               <MessageSquare className="w-4 h-4" />
-              查看来源消息
+              {task.sourceMessageInfo ? `查看来源消息 (${task.sourceMessageInfo.channelName})` : '查看来源消息'}
             </button>
           )}
           
@@ -317,6 +341,36 @@ export default function TaskDetail({ task, onClose, onUpdate }: TaskDetailProps)
             删除
           </button>
         </div>
+        
+        {task.sourceMessageInfo && (
+          <div className="mt-4 p-4 bg-[#2C3E50] rounded-lg">
+            <h4 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4" />
+              来源消息
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400">频道:</span>
+                <span className="text-white">{task.sourceMessageInfo.channelName}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400">发送者:</span>
+                <span className="text-white">{task.sourceMessageInfo.senderName}</span>
+              </div>
+              {task.sourceMessageInfo.mentions && task.sourceMessageInfo.mentions.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">@提及:</span>
+                  <span className="text-orange-400">
+                    {task.sourceMessageInfo.mentions.map(id => members.find(m => m.id === id)?.name).filter(Boolean).join(', ')}
+                  </span>
+                </div>
+              )}
+              <div className="mt-2 pt-2 border-t border-[#34495E]">
+                <p className="text-gray-300 line-clamp-3">{task.sourceMessageInfo.content}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
