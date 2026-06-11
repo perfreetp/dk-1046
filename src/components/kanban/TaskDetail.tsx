@@ -1,0 +1,192 @@
+import { X, Clock, User, AlertCircle, CheckCircle, Trash2, Edit2 } from 'lucide-react';
+import { useStore } from '../../store';
+import { Task } from '../../types';
+import { formatDateTime, formatTaskDueDate } from '../../utils/dateUtils';
+
+interface TaskDetailProps {
+  task: Task;
+  onClose: () => void;
+}
+
+export default function TaskDetail({ task, onClose }: TaskDetailProps) {
+  const { channels, members, updateTask, deleteTask, currentUser } = useStore();
+  
+  const channel = channels.find(ch => ch.id === task.channelId);
+  const assignee = members.find(m => m.id === task.assigneeId);
+  const isAssignee = task.assigneeId === currentUser.id;
+  
+  const handleStatusChange = (newStatus: Task['status']) => {
+    updateTask(task.id, { status: newStatus });
+  };
+  
+  const handleDelete = () => {
+    if (confirm('确定要删除这个任务吗？')) {
+      deleteTask(task.id);
+      onClose();
+    }
+  };
+  
+  const getPriorityColor = (priority: Task['priority']) => {
+    switch (priority) {
+      case 'urgent': return 'bg-red-500/20 text-red-400 border-red-500';
+      case 'important': return 'bg-orange-500/20 text-orange-400 border-orange-500';
+      default: return 'bg-blue-500/20 text-blue-400 border-blue-500';
+    }
+  };
+  
+  const getPriorityLabel = (priority: Task['priority']) => {
+    switch (priority) {
+      case 'urgent': return '紧急';
+      case 'important': return '重要';
+      default: return '一般';
+    }
+  };
+  
+  const isOverdue = task.dueDate < Date.now() && task.status !== 'completed';
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
+      <div className="bg-[#1E3A5F] rounded-lg w-full max-w-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between mb-6">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-2xl font-bold text-white">{task.title}</h2>
+              <span className={`px-3 py-1 text-sm rounded border ${getPriorityColor(task.priority)}`}>
+                {getPriorityLabel(task.priority)}
+              </span>
+            </div>
+            {channel && (
+              <p className="text-sm text-gray-400">所属频道: {channel.name}</p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-white hover:bg-[#2C3E50] rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        {task.description && (
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-300 mb-2">任务描述</h3>
+            <p className="text-white bg-[#2C3E50] rounded-lg p-4">
+              {task.description}
+            </p>
+          </div>
+        )}
+        
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="bg-[#2C3E50] rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <User className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-400">负责人</span>
+            </div>
+            {assignee && (
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                  {assignee.name.charAt(0)}
+                </div>
+                <div>
+                  <p className="text-white font-medium">{assignee.name}</p>
+                  <p className="text-xs text-gray-400">{assignee.position}</p>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <div className="bg-[#2C3E50] rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-400">截止日期</span>
+            </div>
+            <p className={`text-lg font-semibold ${isOverdue ? 'text-red-400' : 'text-white'}`}>
+              {formatTaskDueDate(task.dueDate)}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              {formatDateTime(task.dueDate)}
+            </p>
+          </div>
+        </div>
+        
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-gray-300 mb-3">任务状态</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <button
+              onClick={() => handleStatusChange('todo')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-colors ${
+                task.status === 'todo'
+                  ? 'bg-gray-500/20 text-gray-400 border-2 border-gray-500'
+                  : 'bg-[#2C3E50] text-gray-300 hover:bg-[#34495E] border-2 border-transparent'
+              }`}
+            >
+              <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+              <span className="text-sm font-medium">待处理</span>
+            </button>
+            
+            <button
+              onClick={() => handleStatusChange('inProgress')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-colors ${
+                task.status === 'inProgress'
+                  ? 'bg-blue-500/20 text-blue-400 border-2 border-blue-500'
+                  : 'bg-[#2C3E50] text-gray-300 hover:bg-[#34495E] border-2 border-transparent'
+              }`}
+            >
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm font-medium">进行中</span>
+            </button>
+            
+            <button
+              onClick={() => handleStatusChange('completed')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-colors ${
+                task.status === 'completed'
+                  ? 'bg-green-500/20 text-green-400 border-2 border-green-500'
+                  : 'bg-[#2C3E50] text-gray-300 hover:bg-[#34495E] border-2 border-transparent'
+              }`}
+            >
+              <CheckCircle className="w-4 h-4" />
+              <span className="text-sm font-medium">已完成</span>
+            </button>
+          </div>
+        </div>
+        
+        {task.status === 'completed' && task.completedAt && (
+          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+            <div className="flex items-center gap-2 text-green-400">
+              <CheckCircle className="w-5 h-5" />
+              <span className="font-medium">任务已完成</span>
+            </div>
+            <p className="text-sm text-green-400/80 mt-1">
+              完成时间: {formatDateTime(task.completedAt)}
+            </p>
+          </div>
+        )}
+        
+        <div className="flex gap-3">
+          {isAssignee && task.status !== 'completed' && (
+            <button
+              onClick={() => handleStatusChange('completed')}
+              className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+            >
+              <CheckCircle className="w-4 h-4" />
+              标记完成
+            </button>
+          )}
+          
+          <button className="flex items-center gap-2 px-4 py-2 bg-[#2C3E50] text-white rounded-lg hover:bg-[#34495E] transition-colors">
+            <Edit2 className="w-4 h-4" />
+            编辑
+          </button>
+          
+          <button
+            onClick={handleDelete}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
